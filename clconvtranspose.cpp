@@ -4,6 +4,8 @@
 #include <string>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <cstdlib>
 
 #include "CL/cl.h"
 
@@ -246,31 +248,24 @@ cl_program compileProgram(const char *filename)
     return program;
 }
 
-// const int input_width = 1920;
-// const int input_height = 1080;
-// const int input_channels = 32;
-// const int output_width = 3840;
-// const int output_height = 2160;
+// const int input_width = 4;
+// const int input_height = 4;
+// const int input_channels = 2;
+// const int output_width = 8;
+// const int output_height = 8;
 // const int output_channels = 1;
-// const int filter_width = 4;
-// const int filter_height = 4;
+// const int filter_width = 1;
+// const int filter_height = 1;
 // const int stide_x = 2;
 // const int stide_y = 2;
 
-const int input_width = 4;
-const int input_height = 4;
-const int input_channels = 2;
-const int output_width = 8;
-const int output_height = 8;
-const int output_channels = 1;
-const int filter_width = 1;
-const int filter_height = 1;
-const int stide_x = 2;
-const int stide_y = 2;
+//[input_channels][input_height][input_width]
+//[output_channels][output_height][output_width]
+//[output_channels][input_channels][2 * filter_height + 1][2 * filter_width + 1]
 
-float input_image[input_channels][input_height][input_width];
-float output_image[output_channels][output_height][output_width];
-float filter_image[output_channels][input_channels][2 * filter_height + 1][2 * filter_width + 1];
+float *input_image;
+float *output_image;
+float *filter_image;
 
 cl_mem createImage(int width, int height, int channels, int flag)
 {
@@ -382,19 +377,45 @@ void readImage(cl_mem mem, int width, int height, int channels, void *image)
     }
 }
 
+void writeFile(const char* filename, int length, void* data)
+{
+    FILE *f = fopen(filename, "wb");
+    int write = (int)fwrite(data, sizeof(float), length, f);
+    if(write != length)
+        throw runtime_error("fail to write file");
+    fclose(f);
+}
+
 int main()
 {
+    int input_width = 1920;
+    int input_height = 1080;
+    int input_channels = 32;
+    int stide_x = 2;
+    int stide_y = 2;
+    int output_channels = 1;
+    int filter_width = 4;
+    int filter_height = 4;
+
+    int output_width = input_width * stide_x;
+    int output_height = input_height * stide_y;
+
+    int input_length = input_channels * input_height * input_width;
+    int output_length = output_channels * output_height * output_width;
+    int filter_length = output_channels * input_channels * (2 * filter_height + 1) * (2 * filter_width + 1);
+
+    input_image = new float[input_length];
+    output_image = new float[output_length];
+    filter_image = new float[filter_length];
+
+    srand((unsigned int)time(NULL));
+
+    for(int i = 0; i < input_length; ++i)
+        input_image[i] = (float)rand() / RAND_MAX;
+    for(int i = 0; i < filter_length; ++i)
+        filter_image[i] = (float)rand() / RAND_MAX;
+
     cl_int clerror = 0;
-
-    for(int i = 0; i < 9; i++)
-        ((float*)(filter_image[0][0]))[i] = 1.0;
-    for(int i = 0; i < 9; i++)
-        ((float*)(filter_image[0][1]))[i] = 0;
-
-    for(int i = 0; i < 16; ++i)
-        ((float*)(input_image[0]))[i] = i;
-        for(int i = 0; i < 16; ++i)
-        ((float*)(input_image[1]))[i] = 0;
 
     createContext();
     cl_program program = compileProgram("convtranspose.cl");
@@ -435,7 +456,7 @@ int main()
     writeImage(mem_input, input_width, input_height, input_channels, input_image);
     writeImage(mem_filter, 2 * filter_width + 1, 2 * filter_height + 1, output_channels * input_channels, filter_image);
 
-    size_t globalsize[] = {output_width, output_height, 1};
+    size_t globalsize[] = {(size_t)output_width, (size_t)output_height, 1};
     size_t localsize[] = {4, 4, 1};
 
     clerror = clEnqueueNDRangeKernel(
@@ -454,16 +475,11 @@ int main()
         throw runtime_error("fail to run kernel");
     }
 
-    readImage(mem_output, output_height, output_width, output_channels, output_image);
+    readImage(mem_output, output_width, output_height, output_channels, output_image);
 
-    for(int i = 0; i < 8; ++i)
-    {
-        for(int j = 0; j < 8; ++j)
-        {
-            printf("%d ", (int)(output_image[0][i][j] + 0.5f));
-        }
-        printf("\n");
-    }
+    writeFile("input.data", input_length, input_image);
+    writeFile("filter.data", filter_length, filter_image);
+    writeFile("output.data", output_length, output_image);
 
     return 0;
 }
